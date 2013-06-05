@@ -27,7 +27,37 @@ typedef struct
 	unsigned int delegateImageDownloadFailedWithData:1;
 } NyxDelegateFlags;
 
+#pragma mark - JCImageCache
+@interface JCImageCache : NSCache
+- (UIImage *)cachedImageForURL:(NSURL *)url;
+- (void)cacheImage:(UIImage *)image
+            forURL:(NSURL *)url;
+@end
 
+static inline NSString *JCImageCacheKeyFromURL(NSURL *url)
+{
+    return [url absoluteString];
+}
+
+@implementation JCImageCache
+
+- (UIImage *)cachedImageForURL:(NSURL *)url
+{
+    return [self objectForKey:JCImageCacheKeyFromURL(url)];
+}
+
+- (void)cacheImage:(UIImage *)image
+            forURL:(NSURL *)url
+{
+    if (image && url)
+    {
+        [self setObject:image forKey:JCImageCacheKeyFromURL(url)];
+    }
+}
+
+@end
+
+#pragma mark - NYXProgressiveImageView
 @interface NYXProgressiveImageView()
 -(void)initializeAttributes;
 -(CGImageRef)createTransitoryImage:(CGImageRef)partialImage CF_RETURNS_RETAINED;
@@ -63,7 +93,7 @@ typedef struct
 }
 
 @synthesize delegate = _delegate;
-@synthesize caching = _caching;
+@synthesize cacheType = _cacheType;
 @synthesize cacheTime = _cacheTime;
 @synthesize downloading = _downloading;
 
@@ -138,7 +168,7 @@ typedef struct
 
     _url = url;
 
-	if (_caching)
+	if (_cacheType == JCCacheTypeNYX)
 	{
         NSFileManager* fileManager = [[NSFileManager alloc] init];
 
@@ -170,6 +200,21 @@ typedef struct
 			}
 		}
 	}
+    else if (_cacheType == JCCacheTypeHeap)
+    {
+        UIImage *cachedImage = [[[self class] sharedImageCache] cachedImageForURL:url];
+        if (cachedImage)
+            [self setImage:cachedImage];
+        
+        //  To be added later: check for local hash of image to check and see if data at server URL is different
+        
+        //  send request to server
+        //  receive JSON payload with URL + hash for new image
+        //  compare local hash with server hash and, if not equal, requests the URL
+        
+        //  Right now it will still load the image from the server, even if a local copy
+        //  of the same image laready exists
+    }
 
 	dispatch_async(_queue, ^{
 		NSURLRequest* request = [[NSURLRequest alloc] initWithURL:url cachePolicy:NSURLRequestReturnCacheDataElseLoad timeoutInterval:kNyxDefaultTimeoutValue];
@@ -276,7 +321,7 @@ typedef struct
 				[_delegate imageDidLoadWithImage:img];
 		});
 
-		if (_caching)
+		if (_cacheType == JCCacheTypeNYX)
 		{
 			// Create cache directory if it doesn't exist
 			BOOL isDir = YES;
@@ -291,6 +336,11 @@ typedef struct
 			//[img saveToPath:path uti:CGImageSourceGetType(_imageSource) backgroundFillColor:nil];
 			[_dataTemp writeToFile:path options:NSDataWritingAtomic error:nil];
 		}
+        else if (_cacheType == JCCacheTypeHeap)
+        {
+            NSURL *requestURL = [[connection originalRequest] URL];
+            [[[self class] sharedImageCache] cacheImage:img forURL:requestURL];
+        }
 		
 		_dataTemp = nil;
 	}
@@ -325,7 +375,7 @@ typedef struct
 -(void)initializeAttributes
 {
 	_cacheTime = kNyxDefaultCacheTimeValue;
-	_caching = NO;
+	_cacheType = JCCacheTypeNone;
 	_queue = dispatch_queue_create("com.cits.pdlqueue", DISPATCH_QUEUE_SERIAL);
 	_imageOrientation = UIImageOrientationUp;
 }
@@ -342,6 +392,7 @@ typedef struct
 	return goodImageRef;
 }
 
+#pragma mark - NYX Filesystem Caching
 +(NSString*)cacheDirectoryAddress
 {
 	NSArray* paths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
@@ -370,6 +421,19 @@ typedef struct
     [[[NSFileManager alloc] init] removeItemAtPath:[[NYXProgressiveImageView cacheDirectoryAddress] stringByAppendingPathComponent:[self cachedImageSystemName]] error:nil];
 }
 
+#pragma mark - Jim Cervone Heap Caching
++ (JCImageCache *)sharedImageCache
+{
+    static JCImageCache *_imageCache = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        _imageCache = [[JCImageCache alloc] init];
+    });
+    
+    return _imageCache;
+}
+
+#pragma mark - Image Orientation
 +(UIImageOrientation)exifOrientationToiOSOrientation:(int)exifOrientation
 {
 	UIImageOrientation orientation = UIImageOrientationUp;
