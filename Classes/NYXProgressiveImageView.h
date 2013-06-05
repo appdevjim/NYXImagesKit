@@ -8,6 +8,12 @@
 //  Caching stuff by raphaelp
 //
 
+typedef enum {
+    JCCacheTypeNone         = 0,
+    JCCacheTypeHeap         = 1,
+    JCCacheTypeDocuments    = 2,
+    JCCacheTypeNYX          = JCCacheTypeDocuments
+    } JCCacheType;
 
 @protocol NYXProgressiveImageViewDelegate <NSObject>
 @optional
@@ -29,7 +35,9 @@
 /// Delegate
 @property (nonatomic, weak) IBOutlet id <NYXProgressiveImageViewDelegate> delegate;
 /// Enable / Disable caching
-@property (nonatomic, getter = isCaching) BOOL caching;
+//@property (nonatomic, getter = isCaching) BOOL caching;
+@property (nonatomic) JCCacheType cacheType;
+
 /// Cache time in seconds
 @property (nonatomic) NSTimeInterval cacheTime;
 /// Downloading flag
